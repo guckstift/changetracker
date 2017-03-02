@@ -29,9 +29,10 @@ class ChangeTracker ():
 	non-threaded mode it returns not before ChangeTracker.stop () is called from somewhere out of
 	the handler-callbacks.
 	"""
-	def __init__ (self, path = None, interval = 1.0, handler = None, threaded = True):
+	def __init__ (self, paths = None, interval = 1.0, handler = None, threaded = True):
 		"""
-		@param path: The path to the directory, which you want to monitor
+		@param paths: The path(s) to the directory, which you want to monitor. Might be either a
+			string or a list of strings.
 		@param interval: seconds between two monitoring updates
 		@type interval: float
 		@param handler: A handler-object, receiving different callbacks on change-events;
@@ -41,8 +42,12 @@ class ChangeTracker ():
 			it runs asynchronously.
 		@type threaded: bool
 		"""
-		# path to be watched
-		self.path = os.getcwd () if path is None else path
+		# paths to be watched
+		self.paths = (
+			os.getcwd () if paths is None else
+			[paths] if type(paths) is str else
+			paths
+		)
 		# seconds between two updates
 		self.interval = interval
 		# object, to be notified via callbacks
@@ -55,6 +60,9 @@ class ChangeTracker ():
 
 		# changetracker thread if threading is wished
 		self.thread = threading.Thread (target=self.run) if threaded else None
+		
+		# prepare paths
+		self.paths = [os.path.realpath(os.path.expanduser(path)) for path in self.paths]
 	
 	def start (self):
 		"""
@@ -141,21 +149,24 @@ class ChangeTracker ():
 		changeditems = {}
 		moveditems = {}
 		
-		for itempath in recursive_list (self.path):
-			itempath = itempath[len(self.path)+1:]
-			itempath = itempath.replace ("\\", "/")
-			if itempath in removeditems:
-				del removeditems [itempath]
-			item = self.allitems [itempath] if itempath in self.allitems else None
-			if item is None:
-				item = TrackedItem (itempath, self)
-				self.allitems [itempath] = item
-				addeditems [itempath] = item
-			elif item.update ():
-				changeditems [itempath] = item
+		for path in self.paths:
+			for itempath in recursive_list (path):
+			
+				if itempath in removeditems:
+					del removeditems [itempath]
+				
+				item = self.allitems [itempath] if itempath in self.allitems else None
+				
+				if item is None:
+					item = TrackedItem (itempath, self)
+					self.allitems [itempath] = item
+					addeditems [itempath] = item
+				elif item.update ():
+					changeditems [itempath] = item
 		
 		addedhashes = [ i.hash for i in addeditems.values() ]
-		for removeditem in removeditems.values():
+		
+		for removeditem in list(removeditems.values()):
 			if removeditem.itemtype == "file" and removeditem.hash in addedhashes:
 				addeditem = [i for i in addeditems.values() if i.hash==removeditem.hash] [0]
 				del addeditems [addeditem.path]
@@ -210,20 +221,16 @@ class TrackedItem:
 	def __str__ (self):
 	
 		if self.itemtype is None:
-			return "(NONEXISTING:"+self.abspath()+")"
+			return "(NONEXISTING:"+self.path+")"
 		elif self.itemtype == "file":
-			return "("+self.abspath()+", "+str(self.modtime)+", "+self.itemtype+", "+ \
+			return "("+self.path+", "+str(self.modtime)+", "+self.itemtype+", "+ \
 				binascii.hexlify(self.hash).decode()+")"
 		else:
-			return "("+self.abspath()+", "+str(self.modtime)+", "+self.itemtype+")"
+			return "("+self.path+", "+str(self.modtime)+", "+self.itemtype+")"
 	
 	def __repr__ (self):
 	
 		return str(self)
-	
-	def abspath (self):
-	
-		return os.path.join (self.ct.path, self.path)
 		
 	def update (self, init=False, dohash=True):
 		"""
@@ -232,11 +239,11 @@ class TrackedItem:
 		"""
 		
 		# itemtype = one of "link", "file", "dir", None
-		if os.path.islink (self.abspath()):
+		if os.path.islink (self.path):
 			self.itemtype = "link"
-		elif os.path.isfile (self.abspath()):
+		elif os.path.isfile (self.path):
 			self.itemtype = "file"
-		elif os.path.isdir (self.abspath()):
+		elif os.path.isdir (self.path):
 			self.itemtype = "dir"
 		else:
 			self.itemtype = None #: might be one of "link" , "file" , "dir"
@@ -249,7 +256,7 @@ class TrackedItem:
 		
 		# last modification time if it is a file
 		if self.itemtype == "file":
-			newmodtime = os.stat(self.abspath()).st_mtime
+			newmodtime = os.stat(self.path).st_mtime
 			if init:
 				self.modtime = newmodtime
 			elif newmodtime > self.modtime:
@@ -264,7 +271,7 @@ class TrackedItem:
 	
 		if self.itemtype == "file":
 			m = hashlib.md5 ()
-			fs = open (self.abspath(), "rb")
+			fs = open (self.path, "rb")
 
 			while True:
 				block = fs.read (32)
