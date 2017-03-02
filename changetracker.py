@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 changetracker is a filesystem monitor. It monitors a given directory in your filesystem for changes
 like:
@@ -13,7 +15,7 @@ The source code of changetracker contains a short commented example on how to us
 of the file.
 """
 
-import os, time, threading, pickle, hashlib, copy
+import os, time, threading, pickle, hashlib, copy, binascii
 
 class ChangeTracker ():
 	"""
@@ -32,7 +34,7 @@ class ChangeTracker ():
 		@param path: The path to the directory, which you want to monitor
 		@param interval: seconds between two monitoring updates
 		@type interval: float
-		@param handler: A handler-object, recieving different callbacks on change-events;
+		@param handler: A handler-object, receiving different callbacks on change-events;
 			Defaults to L{DefaultChangeHandler <DefaultChangeHandler>}. See its description for
 			how the callback-methods in a handler-object should look like.
 		@param threaded: True if ChangeTracker should run in a seperate thread, otherwise
@@ -45,7 +47,7 @@ class ChangeTracker ():
 		self.interval = interval
 		# object, to be notified via callbacks
 		self.handler = DefaultChangeHandler () if handler is None else handler	
-		# dict with TrackeItem objects where the itempath is the key
+		# dict with TrackedItem objects where the itempath is the key
 		self.allitems = {}
 		
 		self.running = False
@@ -126,7 +128,7 @@ class ChangeTracker ():
 			self.allitems = pickle.loads (pickleditems)
 			for i in self.allitems.values():
 				i.ct = self
-		except IOError:
+		except OSError:
 			pass
 	
 	def update (self):
@@ -164,7 +166,7 @@ class ChangeTracker ():
 				self.allitems [moveditem.path] = moveditem
 				moveditems [moveditem.path] = moveditem
 		
-		for removeditem in	removeditems.values():
+		for removeditem in removeditems.values():
 			if not self.handler is None:
 				self.handler.on_removed (removeditem)
 			del self.allitems [removeditem.path]
@@ -211,7 +213,7 @@ class TrackedItem:
 			return "(NONEXISTING:"+self.abspath()+")"
 		elif self.itemtype == "file":
 			return "("+self.abspath()+", "+str(self.modtime)+", "+self.itemtype+", "+ \
-				self.hash.encode("hex")+")"
+				binascii.hexlify(self.hash).decode()+")"
 		else:
 			return "("+self.abspath()+", "+str(self.modtime)+", "+self.itemtype+")"
 	
@@ -228,6 +230,7 @@ class TrackedItem:
 		Updates the current state (itemtype, existence) and modtime of the item
 		return True if modtime has changed on a file, False otherwise
 		"""
+		
 		# itemtype = one of "link", "file", "dir", None
 		if os.path.islink (self.abspath()):
 			self.itemtype = "link"
@@ -262,9 +265,11 @@ class TrackedItem:
 		if self.itemtype == "file":
 			m = hashlib.md5 ()
 			fs = open (self.abspath(), "rb")
+
 			while True:
 				block = fs.read (32)
-				if block == "":
+				
+				if block == b"":
 					break
 				m.update (block)
 			self.hash = m.digest ()
@@ -293,7 +298,7 @@ class DefaultChangeHandler:
 		@param item: the item, which has changed
 		@type item: L{TrackedItem <TrackedItem>}
 		"""
-		print item,"was changed"
+		print(item, "was changed")
 
 	def on_removed (self, item):
 		"""
@@ -301,7 +306,7 @@ class DefaultChangeHandler:
 		@param item: the item, which has been removed
 		@type item: L{TrackedItem <TrackedItem>}
 		"""
-		print item,"was removed"
+		print(item,"was removed")
 
 	def on_added (self, item):
 		"""
@@ -309,7 +314,7 @@ class DefaultChangeHandler:
 		@param item: the item, which has been added
 		@type item: L{TrackedItem <TrackedItem>}
 		"""
-		print item,"was added"
+		print(item,"was added")
 
 	def on_moved (self, item):
 		"""
@@ -317,7 +322,7 @@ class DefaultChangeHandler:
 		@param item: the item, which has been moved
 		@type item: L{TrackedItem <TrackedItem>}
 		"""
-		print item,"was moved from",item.oldpath
+		print(item,"was moved from", item.oldpath)
 
 def recursive_list (rootpath):
 	"""
@@ -336,12 +341,12 @@ if __name__ == "__main__":
 	try:
 		ct = ChangeTracker () # create a ChangeTracker-object in threaded mode
 		ct.loadstate () # try to load an item-list from previous sessions
-		ct.start () # launch to ChangeTracker
+		ct.start () # launch the ChangeTracker
 		while True: # since we're in threaded mode, we have to idle ...
 			time.sleep(2)
 	except KeyboardInterrupt: # ... until the user interrupts with Ctrl-C
 		ct.stop() # terminate the monitoring
 		ct.savestate() # and save the item-list to disk
 
-	print "kthxbye"
+	print("kthxbye")
 
